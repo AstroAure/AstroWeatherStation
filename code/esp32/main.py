@@ -21,7 +21,7 @@ i2c = I2C(0, sda=Pin(22), scl=Pin(23), freq=400_000)
 DHT22sensor = dht.DHT22(Pin(0))
 # MLX90640 Infrared camera
 MLX90640sensor = MLX90640(i2c)
-MLX90640sensor.refresh_rate = RefreshRate.REFRESH_1_HZ
+MLX90640sensor.refresh_rate = RefreshRate.REFRESH_2_HZ
 ir_frame = init_float_array(768)
 # MH-RD Rain sensor
 MHRDsensor = ADC(Pin(1))
@@ -29,7 +29,7 @@ MHRDsensor.width(ADC.WIDTH_12BIT)
 MHRDsensor.atten(ADC.ATTN_11DB)
 # TSL2591 luminosity
 TSL2591 = tsl2591.TSL2591(i2c=i2c)
-TSL2591.gain = tsl2591.GAIN_LOW
+TSL2591.gain = tsl2591.GAIN_HIGH
 TSL2591.integration_time = tsl2591.INTEGRATIONTIME_100MS
 
 def dew_point(tc, rh):
@@ -61,7 +61,10 @@ def mean(l):
 
 # Establish connection
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.bind(('', 80))
+try:
+    s.bind(('', 80))
+except OSError:
+    continue
 s.listen(5)
 
 oldsec = -1
@@ -90,6 +93,7 @@ while True:
 
         # MLX90640 Infrared camera
         MLX90640sensor.get_frame(ir_frame)
+        MLX90640sensor.get_frame(ir_frame) # Read twice to solve checkerboard issue
         ir_center = cutout_frame(ir_frame, 16, 12, 5, 5)
         temp_sky = mean(ir_center)
         # Heuristic to check in real conditions
@@ -102,18 +106,15 @@ while True:
             
         # MHRD Rain sensor
         rain_sens = MHRDsensor.read()
-        if (rain_sens > 3_200):
+        if (rain_sens > 3_000):
             rain = 0
-        elif (rain_sens > 3_000):
-            rain = -(rain - 3_200)/(3_200-3_000)
+        elif (rain_sens > 2_800):
+            rain = -(rain_sens - 3_000)/(3_000-2_800)
         else:
             rain = 1
             
         # TSL2591 luminosity
-        try:
-            tsl_lux = TSL2591.lux
-        except RuntimeError: # Luminosity saturation
-            tsl_lux = -1
+        tsl_lux = TSL2591.lux_auto_gain
         tsl_ir = TSL2591.infrared
         tsl_vis = TSL2591.visible
         tsl_full = TSL2591.full_spectrum
@@ -136,7 +137,9 @@ while True:
 #         file.write(f"pressure={pressure:.2f} <br />\n") # WeatherWatcher keyword
         file.write(f"luminosity={tsl_lux:.5f} <br />\n")
         file.write('</body>\n')
-        file.write(f"<ir_image>\n{str(ir_frame)}\n</ir_image>\n")
+        file.write('<ir_image>\n')
+        file.write(f"ir_image={str(ir_frame)} <br />\n")
+        file.write('</ir_image>\n')
         file.write('</html>\n')
         file.close()
 
